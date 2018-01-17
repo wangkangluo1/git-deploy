@@ -1,9 +1,14 @@
 <?php
+require 'vendor/autoload.php';
+use Monolog\Logger; 
+use Monolog\Handler\StreamHandler;
+$log = new Logger('name');
+$log->pushHandler(new StreamHandler('/var/log/git-pull.log', Logger::WARNING));
+
 require_once("config.php");
 
 $content = file_get_contents("php://input");
 $json    = json_decode($content, true);
-$file    = fopen(LOGFILE, "a");
 $time    = time();
 $token   = false;
 
@@ -18,14 +23,13 @@ if (!$token && isset($_SERVER["HTTP_X_HUB_SIGNATURE"])) {
 
 // log the time
 date_default_timezone_set("UTC");
-fputs($file, date("d-m-Y (H:i:s)", $time) . "\n");
+$log->info(date("d-m-Y (H:i:s)", $time));
 
 // function to forbid access
-function forbid($file, $reason) {
+function forbid($log, $reason) {
     // explain why
-    if ($reason) fputs($file, "=== ERROR: " . $reason . " ===\n");
-    fputs($file, "*** ACCESS DENIED ***" . "\n\n\n");
-    fclose($file);
+    if ($reason) $log->info("=== ERROR: " . $reason . " ===");
+    $log->info("*** ACCESS DENIED ***");
 
     // forbid
     header("HTTP/1.0 403 Forbidden");
@@ -45,20 +49,20 @@ function ok() {
 
 // Check for a GitHub signature
 if (!empty(TOKEN) && isset($_SERVER["HTTP_X_HUB_SIGNATURE"]) && $token !== hash_hmac($algo, $content, TOKEN)) {
-    forbid($file, "X-Hub-Signature does not match TOKEN");
+    forbid($log, "X-Hub-Signature does not match TOKEN");
 // Check for a GitLab token
 } elseif (!empty(TOKEN) && isset($_SERVER["HTTP_X_GITLAB_TOKEN"]) && $token !== TOKEN) {
-    forbid($file, "X-GitLab-Token does not match TOKEN");
+    forbid($log, "X-GitLab-Token does not match TOKEN");
 // Check for a $_GET token
 } elseif (!empty(TOKEN) && isset($_GET["token"]) && $token !== TOKEN) {
-    forbid($file, "\$_GET[\"token\"] does not match TOKEN");
+    forbid($log, "\$_GET[\"token\"] does not match TOKEN");
 // if none of the above match, but a token exists, exit
 } elseif (!empty(TOKEN) && !isset($_SERVER["HTTP_X_HUB_SIGNATURE"]) && !isset($_SERVER["HTTP_X_GITLAB_TOKEN"]) && !isset($_GET["token"])) {
-    forbid($file, "No token detected");
+    forbid($log, "No token detected");
 } else {
     // check if pushed branch matches branch specified in config
     if ($json["ref"] === BRANCH) {
-        fputs($file, $content . PHP_EOL);
+        $log->info($content . PHP_EOL);
 
         // ensure directory is a repository
         if (file_exists(DIR . ".git") && is_dir(DIR)) {
@@ -75,21 +79,18 @@ if (!empty(TOKEN) && isset($_SERVER["HTTP_X_HUB_SIGNATURE"]) && $token !== hash_
                     try {
                         shell_exec(AFTER_PULL);
                     } catch (Exception $e) {
-                        fputs($file, $e . "\n");
+                        $log->info($e);
                     }
                 }
 
-                fputs($file, "*** AUTO PULL SUCCESFUL ***" . "\n");
+                $log->info("*** AUTO PULL SUCCESFUL ***");
             } catch (Exception $e) {
-                fputs($file, $e . "\n");
+                $log->info($e);
             }
         } else {
-            fputs($file, "=== ERROR: DIR is not a repository ===" . "\n");
+            $log->info("=== ERROR: DIR is not a repository ===");
         }
     } else{
-        fputs($file, "=== ERROR: Pushed branch does not match BRANCH ===\n");
+        $log->info("=== ERROR: Pushed branch does not match BRANCH ===");
     }
 }
-
-fputs($file, "\n\n" . PHP_EOL);
-fclose($file);
